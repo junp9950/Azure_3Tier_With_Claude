@@ -1,0 +1,59 @@
+# === Terraform ===
+# 로컬 상태 및 백업 파일 (민감 정보 포함 가능, 절대 커밋 금지)
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+crash.*.log
+
+# 로컬 실행 시 생성되는 디렉토리
+.terraform/
+.terraform.*
+
+# Override 파일 (로컬 전용)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# 변수 파일 (민감 정보 포함 가능)
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# 예시/샘플 변수 파일은 커밋 허용
+*.tfvars.example
+*.tfvars.sample
+
+# === IDE / OS ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# === 기타 ===
+# 잠금 파일(버전 고정을 위해 terraform.lock.hcl은 커밋 권장, 주석 해제시 제외)
+# terraform.lock.hcl
+# Terraform
+.terraform/
+.terraform.*
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Variables (secrets)
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

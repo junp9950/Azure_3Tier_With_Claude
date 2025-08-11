@@ -1,0 +1,514 @@
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~>3.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+}
+
+resource "azurerm_resource_group" "main" {
+  name     = "jeewoong-test-rg"
+  location = "Korea Central"
+}
+
+resource "azurerm_virtual_network" "main" {
+  name                = "jeewoong-test-vnet"
+  address_space       = ["10.0.0.0/16"]
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+resource "azurerm_subnet" "web" {
+  name                 = "jeewoong-test-subnet-web"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+resource "azurerm_subnet" "app" {
+  name                 = "jeewoong-test-subnet-app"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.2.0/24"]
+}
+
+resource "azurerm_subnet" "data" {
+  name                 = "jeewoong-test-subnet-data"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.3.0/24"]
+}
+
+resource "azurerm_network_security_group" "web" {
+  name                = "jeewoong-test-nsg-web"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  security_rule {
+    name                       = "HTTP"
+    priority                   = 1001
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "HTTPS"
+    priority                   = 1002
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "SSH"
+    priority                   = 1003
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_network_security_group" "app" {
+  name                = "jeewoong-test-nsg-app"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  security_rule {
+    name                       = "AppPort"
+    priority                   = 1001
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8080"
+    source_address_prefix      = "10.0.1.0/24"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "SSH"
+    priority                   = 1002
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "10.0.1.0/24"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_network_security_group" "data" {
+  name                = "jeewoong-test-nsg-data"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  security_rule {
+    name                       = "MySQL"
+    priority                   = 1001
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3306"
+    source_address_prefix      = "10.0.2.0/24"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "web" {
+  subnet_id                 = azurerm_subnet.web.id
+  network_security_group_id = azurerm_network_security_group.web.id
+}
+
+resource "azurerm_subnet_network_security_group_association" "app" {
+  subnet_id                 = azurerm_subnet.app.id
+  network_security_group_id = azurerm_network_security_group.app.id
+}
+
+resource "azurerm_subnet_network_security_group_association" "data" {
+  subnet_id                 = azurerm_subnet.data.id
+  network_security_group_id = azurerm_network_security_group.data.id
+}
+
+resource "azurerm_public_ip" "lb" {
+  name                = "jeewoong-test-pip-lb"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+resource "azurerm_lb" "main" {
+  name                = "jeewoong-test-lb-web"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  sku                 = "Standard"
+
+  frontend_ip_configuration {
+    name                 = "PublicIPAddress"
+    public_ip_address_id = azurerm_public_ip.lb.id
+  }
+}
+
+resource "azurerm_lb_backend_address_pool" "web" {
+  loadbalancer_id = azurerm_lb.main.id
+  name            = "BackEndAddressPool"
+}
+
+resource "azurerm_lb_probe" "web" {
+  loadbalancer_id = azurerm_lb.main.id
+  name            = "http-probe"
+  port            = 80
+}
+
+resource "azurerm_lb_rule" "web" {
+  loadbalancer_id                = azurerm_lb.main.id
+  name                           = "LBRule"
+  protocol                       = "Tcp"
+  frontend_port                  = 80
+  backend_port                   = 80
+  frontend_ip_configuration_name = "PublicIPAddress"
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.web.id]
+  probe_id                       = azurerm_lb_probe.web.id
+}
+
+resource "azurerm_availability_set" "web" {
+  name                = "jeewoong-test-avset-web"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  managed             = true
+}
+
+resource "azurerm_availability_set" "app" {
+  name                = "jeewoong-test-avset-app"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  managed             = true
+}
+
+resource "azurerm_public_ip" "web" {
+  count               = 2
+  name                = "jeewoong-test-pip-web-${count.index}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  allocation_method   = "Dynamic"
+}
+
+resource "azurerm_network_interface" "web" {
+  count               = 2
+  name                = "jeewoong-test-nic-web-${count.index}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.web.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.web[count.index].id
+  }
+}
+
+resource "azurerm_network_interface_backend_address_pool_association" "web" {
+  count                   = 2
+  network_interface_id    = azurerm_network_interface.web[count.index].id
+  ip_configuration_name   = "internal"
+  backend_address_pool_id = azurerm_lb_backend_address_pool.web.id
+}
+
+resource "azurerm_linux_virtual_machine" "web" {
+  count               = 2
+  name                = "jeewoong-test-vm-web-${count.index}"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  size                = "Standard_B1s"
+  admin_username      = "adminuser"
+  availability_set_id = azurerm_availability_set.web.id
+
+  disable_password_authentication = true
+
+  network_interface_ids = [
+    azurerm_network_interface.web[count.index].id,
+  ]
+
+  admin_ssh_key {
+    username   = var.admin_username
+    public_key = file(var.ssh_public_key_path)
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  custom_data = base64encode(<<-EOF
+    #!/bin/bash
+    apt-get update
+    apt-get install -y nginx
+    
+    # Configure Nginx as reverse proxy
+    cat > /etc/nginx/sites-available/default << 'NGINX_CONF'
+upstream app_servers {
+    server 10.0.2.4:8080;
+    server 10.0.2.5:8080;
+}
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    location / {
+        proxy_pass http://app_servers;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /health {
+        return 200 "Web Server ${count.index} OK";
+        add_header Content-Type text/plain;
+    }
+}
+NGINX_CONF
+
+    systemctl restart nginx
+    systemctl enable nginx
+  EOF
+  )
+}
+
+resource "azurerm_network_interface" "app" {
+  count               = 2
+  name                = "jeewoong-test-nic-app-${count.index}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.app.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+resource "azurerm_linux_virtual_machine" "app" {
+  count               = 2
+  name                = "jeewoong-test-vm-app-${count.index}"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  size                = "Standard_B2s"
+  admin_username      = "adminuser"
+  availability_set_id = azurerm_availability_set.app.id
+
+  disable_password_authentication = true
+
+  network_interface_ids = [
+    azurerm_network_interface.app[count.index].id,
+  ]
+
+  admin_ssh_key {
+    username   = var.admin_username
+    public_key = file(var.ssh_public_key_path)
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  custom_data = base64encode(<<-EOF
+    #!/bin/bash
+    apt-get update
+    apt-get install -y openjdk-11-jdk maven
+
+    # Install Tomcat 9
+    wget https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.80/bin/apache-tomcat-9.0.80.tar.gz -O /tmp/tomcat.tar.gz
+    tar -xzf /tmp/tomcat.tar.gz -C /opt/
+    mv /opt/apache-tomcat-9.0.80 /opt/tomcat
+    
+    # Create tomcat user
+    useradd -r -m -U -d /opt/tomcat -s /bin/false tomcat
+    chown -R tomcat:tomcat /opt/tomcat
+    chmod +x /opt/tomcat/bin/*.sh
+
+    # Create a simple web application
+    mkdir -p /opt/webapp
+    cd /opt/webapp
+
+    # Create pom.xml
+    cat > pom.xml << 'POM_XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.7.0</version>
+        <relativePath/>
+    </parent>
+    <groupId>com.jeewoong</groupId>
+    <artifactId>test-app</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>test-app</name>
+    <description>Simple test application</description>
+    <properties>
+        <java.version>11</java.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+POM_XML
+
+    # Create application directory
+    mkdir -p src/main/java/com/jeewoong/testapp
+
+    # Create main application class
+    cat > src/main/java/com/jeewoong/testapp/TestApplication.java << 'JAVA_APP'
+package com.jeewoong.testapp;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@SpringBootApplication
+@RestController
+public class TestApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(TestApplication.class, args);
+    }
+
+    @GetMapping("/")
+    public String home() {
+        String hostname = System.getenv("HOSTNAME");
+        return "<h1>WAS Server: " + hostname + "</h1><p>Application Server ${count.index} is running!</p>";
+    }
+
+    @GetMapping("/health")
+    public String health() {
+        return "WAS Server ${count.index} OK";
+    }
+
+    @GetMapping("/api/info")
+    public String info() {
+        return "{\"server\":\"WAS-${count.index}\",\"status\":\"running\",\"timestamp\":\"" + System.currentTimeMillis() + "\"}";
+    }
+}
+JAVA_APP
+
+    # Build and run the application
+    mvn clean package -DskipTests
+    
+    # Create systemd service
+    cat > /etc/systemd/system/test-app.service << 'SERVICE_FILE'
+[Unit]
+Description=Test Spring Boot Application
+After=network.target
+
+[Service]
+Type=forking
+User=root
+WorkingDirectory=/opt/app
+ExecStart=/usr/bin/java -jar /opt/app/target/test-app-0.0.1-SNAPSHOT.jar
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_FILE
+
+    systemctl daemon-reload
+    systemctl enable test-app
+    systemctl start test-app
+
+    echo "Application Server ${count.index}" > /tmp/app-info.txt
+  EOF
+  )
+}
+
+resource "azurerm_mysql_flexible_server" "main" {
+  name                   = "jeewoong-test-mysql-${random_string.suffix.result}"
+  resource_group_name    = azurerm_resource_group.main.name
+  location               = azurerm_resource_group.main.location
+  administrator_login    = "mysqladmin"
+  administrator_password = "P@ssw0rd123!"
+  backup_retention_days  = 7
+  delegated_subnet_id    = azurerm_subnet.data.id
+  private_dns_zone_id    = azurerm_private_dns_zone.mysql.id
+  sku_name               = "B_Standard_B1s"
+  version                = "8.0.21"
+
+  depends_on = [azurerm_private_dns_zone_virtual_network_link.mysql]
+}
+
+resource "azurerm_mysql_flexible_database" "main" {
+  name                = "jeewoong_test_database"
+  resource_group_name = azurerm_resource_group.main.name
+  server_name         = azurerm_mysql_flexible_server.main.name
+  charset             = "utf8"
+  collation           = "utf8_unicode_ci"
+}
+
+resource "azurerm_private_dns_zone" "mysql" {
+  name                = "mysql.mysql.database.azure.com"
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "mysql" {
+  name                  = "mysqlVnetZone.com"
+  private_dns_zone_name = azurerm_private_dns_zone.mysql.name
+  virtual_network_id    = azurerm_virtual_network.main.id
+  resource_group_name   = azurerm_resource_group.main.name
+}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}

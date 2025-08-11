@@ -1,0 +1,221 @@
+# WAS Tier Availability Set
+resource "azurerm_availability_set" "app" {
+  name                         = "jeewoong-test-avset-app"
+  location                     = azurerm_resource_group.main.location
+  resource_group_name          = azurerm_resource_group.main.name
+  managed                      = true
+  platform_fault_domain_count = 2
+}
+
+# WAS Tier Network Interfaces
+resource "azurerm_network_interface" "app" {
+  count               = var.app_vm_count
+  name                = "jeewoong-test-nic-app-${count.index}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.app.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+# WAS Tier Virtual Machines (Tomcat)
+resource "azurerm_linux_virtual_machine" "app" {
+  count               = var.app_vm_count
+  name                = "jeewoong-test-vm-app-${count.index}"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  size                = var.vm_size_app
+  admin_username      = var.admin_username
+  availability_set_id = azurerm_availability_set.app.id
+
+  disable_password_authentication = true
+
+  network_interface_ids = [
+    azurerm_network_interface.app[count.index].id,
+  ]
+
+  admin_ssh_key {
+    username   = var.admin_username
+    public_key = file(var.ssh_public_key_path)
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  custom_data = base64encode(<<-EOF
+    #!/bin/bash
+    apt-get update
+    apt-get install -y openjdk-11-jdk maven
+
+    # Install Tomcat 9
+    wget https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.80/bin/apache-tomcat-9.0.80.tar.gz -O /tmp/tomcat.tar.gz
+    tar -xzf /tmp/tomcat.tar.gz -C /opt/
+    mv /opt/apache-tomcat-9.0.80 /opt/tomcat
+    
+    # Create tomcat user
+    useradd -r -m -U -d /opt/tomcat -s /bin/false tomcat
+    chown -R tomcat:tomcat /opt/tomcat
+    chmod +x /opt/tomcat/bin/*.sh
+
+    # Create WAR project
+    mkdir -p /opt/webapp
+    cd /opt/webapp
+
+    # Create pom.xml for WAR project
+    cat > pom.xml << 'POM_XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.jeewoong</groupId>
+    <artifactId>test-webapp</artifactId>
+    <version>1.0.0</version>
+    <packaging>war</packaging>
+    <name>test-webapp</name>
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>javax.servlet</groupId>
+            <artifactId>javax.servlet-api</artifactId>
+            <version>4.0.1</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-war-plugin</artifactId>
+                <version>3.2.3</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+POM_XML
+
+    # Create servlet structure
+    mkdir -p src/main/java/com/jeewoong/servlet
+    mkdir -p src/main/webapp/WEB-INF
+    
+    # Create main servlet
+    cat > src/main/java/com/jeewoong/servlet/TestServlet.java << 'SERVLET_CODE'
+package com.jeewoong.servlet;
+
+import javax.servlet.ServletException;
+import javax.servlet.annotation.WebServlet;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.io.PrintWriter;
+
+@WebServlet("/")
+public class TestServlet extends HttpServlet {
+    
+    @Override
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) 
+            throws ServletException, IOException {
+        response.setContentType("text/html");
+        PrintWriter out = response.getWriter();
+        
+        String hostname = System.getenv("HOSTNAME");
+        if (hostname == null) hostname = "unknown";
+        
+        out.println("<html><head><title>Tomcat WAS Server</title></head><body>");
+        out.println("<h1>Tomcat WAS Server: " + hostname + "</h1>");
+        out.println("<p>Tomcat Application Server ${count.index} is running!</p>");
+        out.println("<p>Timestamp: " + System.currentTimeMillis() + "</p>");
+        out.println("</body></html>");
+    }
+}
+SERVLET_CODE
+
+    # Create health servlet
+    cat > src/main/java/com/jeewoong/servlet/HealthServlet.java << 'HEALTH_SERVLET'
+package com.jeewoong.servlet;
+
+import javax.servlet.ServletException;
+import javax.servlet.annotation.WebServlet;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.io.PrintWriter;
+
+@WebServlet("/health")
+public class HealthServlet extends HttpServlet {
+    
+    @Override
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) 
+            throws ServletException, IOException {
+        response.setContentType("text/plain");
+        PrintWriter out = response.getWriter();
+        out.println("Tomcat WAS Server ${count.index} OK");
+    }
+}
+HEALTH_SERVLET
+
+    # Create web.xml
+    cat > src/main/webapp/WEB-INF/web.xml << 'WEB_XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="http://xmlns.jcp.org/xml/ns/javaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee 
+         http://xmlns.jcp.org/xml/ns/javaee/web-app_4_0.xsd"
+         version="4.0">
+    <display-name>Tomcat Test Web Application</display-name>
+</web-app>
+WEB_XML
+
+    # Build and deploy WAR
+    mvn clean package -DskipTests
+    cp target/test-webapp-1.0.0.war /opt/tomcat/webapps/ROOT.war
+    chown tomcat:tomcat /opt/tomcat/webapps/ROOT.war
+
+    # Create Tomcat systemd service
+    cat > /etc/systemd/system/tomcat.service << 'TOMCAT_SERVICE'
+[Unit]
+Description=Apache Tomcat Web Application Container
+After=network.target
+
+[Service]
+Type=forking
+User=tomcat
+Group=tomcat
+Environment="JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64"
+Environment="CATALINA_HOME=/opt/tomcat"
+Environment="CATALINA_BASE=/opt/tomcat"
+Environment="CATALINA_OPTS=-Xms512M -Xmx1024M -server -XX:+UseParallelGC"
+ExecStart=/opt/tomcat/bin/startup.sh
+ExecStop=/opt/tomcat/bin/shutdown.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+TOMCAT_SERVICE
+
+    # Start Tomcat
+    systemctl daemon-reload
+    systemctl enable tomcat
+    systemctl start tomcat
+
+    echo "Tomcat Application Server ${count.index}" > /tmp/app-info.txt
+  EOF
+  )
+}
